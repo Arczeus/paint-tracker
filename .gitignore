@@ -1,3 +1,5 @@
 .idea
 .venv
 *.txt
+/node_modules
+TODO
