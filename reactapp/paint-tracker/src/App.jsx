@@ -9,9 +9,13 @@ const HiddenCircle = () => {
   )
 }
 
-const BoardPaintSlot = ({ paint, onClick, quantity }) => {
+const BoardPaintSlot = ({ paint, onClick, onRightClick, quantity, cartQty }) => {
   return (
-    <div onClick={onClick} className='circle cursor-pointer relative group flex items-center justify-center'>
+    <div
+      onClick={onClick}
+      onContextMenu={(e) => { e.preventDefault(); onRightClick(); }}
+      className='circle cursor-pointer relative group flex items-center justify-center'
+    >
       <Circle
         size={55}
         strokeWidth={1}
@@ -26,8 +30,9 @@ const BoardPaintSlot = ({ paint, onClick, quantity }) => {
             </p>
           </div>
           <div className="absolute -bottom-1 flex justify-center w-full pointer-events-none">
-            <p className='text-[15px] font-bold text-white bg-black/50 px-1'>
+            <p className='text-[15px] font-bold text-white bg-black/50 px-1 whitespace-nowrap'>
               {quantity}
+              {cartQty > 0 && <span className='text-green-400 ml-1'>(+{cartQty})</span>}
             </p>
           </div>
         </>
@@ -82,24 +87,69 @@ const SelectedPaint = ({ paint, isNewSelection }) => {
 function App() {
   const [selectedPaint, setSelectedPaint] = useState(null);
   const [isNewSelection, setIsNewSelection] = useState(false);
-  const [inventory, setInventory] = useState({});
-  const [searchQuery, setSearchQuery] = useState('');
 
-  const [customPaints, setCustomPaints] = useState([]);
+  const [inventory, setInventory] = useState(() => {
+    const saved = localStorage.getItem('paint-inventory');
+    return saved ? JSON.parse(saved) : {};
+  });
+
+  const [shoppingCart, setShoppingCart] = useState(() => {
+    const saved = localStorage.getItem('paint-shopping-cart');
+    return saved ? JSON.parse(saved) : {};
+  });
+
+  const [board, setBoard] = useState(() => {
+    const saved = localStorage.getItem('paint-board');
+    return saved ? JSON.parse(saved) : Array(105).fill(null);
+  });
+
+  const [customPaints, setCustomPaints] = useState(() => {
+    const saved = localStorage.getItem('paint-custom-paints');
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  const [searchQuery, setSearchQuery] = useState('');
   const [newPaint, setNewPaint] = useState({ name: '', code: '', hex: '#ffffff' });
 
-  const filteredPaints = [...colorsData, ...customPaints]
+  useEffect(() => {
+    localStorage.setItem('paint-inventory', JSON.stringify(inventory));
+  }, [inventory]);
+
+  useEffect(() => {
+    localStorage.setItem('paint-shopping-cart', JSON.stringify(shoppingCart));
+  }, [shoppingCart]);
+
+  useEffect(() => {
+    localStorage.setItem('paint-board', JSON.stringify(board));
+  }, [board]);
+
+  useEffect(() => {
+    localStorage.setItem('paint-custom-paints', JSON.stringify(customPaints));
+  }, [customPaints]);
+
+  const allPaints = [...colorsData, ...customPaints]
     .filter((paint, index, self) =>
       self.findIndex(p => p.code === paint.code) === index
-    )
-    .filter(paint => {
-      if (!searchQuery) return true;
-      const searchLower = searchQuery.toLowerCase();
-      return (
-        paint.name.toLowerCase().includes(searchLower) ||
-        paint.code.toLowerCase().includes(searchLower)
-      );
-    });
+    );
+
+  const filteredPaints = allPaints.filter(paint => {
+    if (!searchQuery) return true;
+    const searchLower = searchQuery.toLowerCase();
+    return (
+      paint.name.toLowerCase().includes(searchLower) ||
+      paint.code.toLowerCase().includes(searchLower)
+    );
+  });
+
+  const boardCodes = new Set(board.filter(p => p).map(p => p.code));
+
+  const inventoryPaints = allPaints.filter(p =>
+    (inventory[p.code]?.qty || 0) > 0 ||
+    boardCodes.has(p.code) ||
+    (shoppingCart[p.code]?.qty || 0) > 0
+  );
+
+  const nonIndexedPaints = inventoryPaints.filter(p => !boardCodes.has(p.code));
 
   const handleAddPaint = () => {
     if (!newPaint.name || !newPaint.code) return;
@@ -118,19 +168,32 @@ function App() {
     }));
   };
 
-  const [board, setBoard] = useState(Array(105).fill(null));
+  const updateShoppingCart = (code, delta) => {
+    setShoppingCart(prev => {
+      const currentQty = prev[code]?.qty || 0;
+      const newQty = Math.max(0, currentQty + delta);
+
+      const newCart = { ...prev };
+
+      if (newQty > 0) {
+        newCart[code] = { qty: newQty };
+      } else {
+        delete newCart[code];
+      }
+
+      return newCart;
+    });
+  };
 
   const handleSlotClick = (index) => {
     const clickedPaint = board[index];
 
-    // If clicking an existing paint and we aren't trying to "place" a new selection
     if (clickedPaint && !isNewSelection) {
       setSelectedPaint(clickedPaint);
       setIsNewSelection(false);
       return;
     }
 
-    // Only allow placing/replacing if a paint is selected AND it's a "New Selection" (!)
     if (selectedPaint && isNewSelection) {
       const newBoard = [...board];
       newBoard[index] = selectedPaint;
@@ -139,18 +202,64 @@ function App() {
     }
   };
 
+  const handleSlotRightClick = (index) => {
+    const newBoard = [...board];
+    newBoard[index] = null;
+    setBoard(newBoard);
+  };
+
   const renderSlots = (count, startIndex) => {
     return Array.from({ length: count }, (_, i) => {
       const index = startIndex + i;
+      const paint = board[index];
       return (
         <BoardPaintSlot
           key={index}
-          paint={board[index]}
-          quantity={board[index] ? inventory[board[index].code]?.qty || 0 : 0}
+          paint={paint}
+          quantity={paint ? inventory[paint.code]?.qty || 0 : 0}
+          cartQty={paint ? shoppingCart[paint.code]?.qty || 0 : 0}
           onClick={() => handleSlotClick(index)}
+          onRightClick={() => handleSlotRightClick(index)}
         />
       );
     });
+  };
+
+  const handleExport = (type) => {
+    let lines = [];
+    let fileName = '';
+
+    if (type === 'inventory') {
+      lines = inventoryPaints.map(p =>
+        `${p.code} - ${p.name} - ${inventory[p.code]?.qty || 0}`
+      );
+      fileName = 'inventory.txt';
+    } else if (type === 'non-indexed') {
+      lines = nonIndexedPaints.map(p =>
+        `${p.code} - ${p.name} - ${inventory[p.code]?.qty || 0}`
+      );
+      fileName = 'non-indexed.txt';
+    } else if (type === 'cart') {
+      lines = allPaints
+        .filter(p => shoppingCart[p.code])
+        .map(p => `${p.code} - ${p.name} - ${shoppingCart[p.code].qty}`);
+      fileName = 'shopping-list.txt';
+    }
+
+    if (lines.length === 0) {
+      alert('List is empty');
+      return;
+    }
+
+    const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   return (
@@ -158,12 +267,97 @@ function App() {
       <div className='flex flex-col h-screen bg-slate-900 text-white'>
         <div className='flex flex-1 overflow-hidden gap-4 p-4'>
 
-          {/*All Paints*/}
-          <div className='w-1/4 p-4 wh-border-slate-400 border-2 rounded-2xl gap-4 p-4'>
-            <p>Inventory</p>
-            Boarded | Paints
-            Non Indexed Paints
-            WIP
+          {/*Left Sidebar*/}
+          <div className='w-1/4 flex flex-col wh-border-slate-400 border-2 rounded-2xl overflow-hidden bg-slate-900'>
+            <div className='flex-1 flex flex-row gap-2 p-2 overflow-y-auto min-h-0'>
+              {/*Full Inventory */}
+              <div className='flex-1 flex flex-col min-w-0 border-r border-slate-700 pr-1'>
+                <h3 className='border-b'>Inventory ({inventoryPaints.length})</h3>
+                <div className='flex-1 overflow-y-auto flex flex-col gap-1 pr-1'>
+                  {inventoryPaints.map(paint => {
+                    const cartQty = shoppingCart[paint.code]?.qty || 0;
+                    return (
+                      <div
+                        key={paint.code}
+                        onClick={() => { setSelectedPaint(paint); setIsNewSelection(true); }}
+                        className='flex items-center justify-between text-sm p-2 cursor-pointer hover:bg-slate-800 rounded'
+                      >
+                        <div className='flex items-center gap-2 overflow-hidden'>
+                          <Circle size={16} fill={paint.hex} strokeWidth={1} />
+                          <span className='truncate'>{paint.code}</span>
+                        </div>
+                        <span className='font-bold text-white'>
+                          {inventory[paint.code]?.qty || 0}
+                          {cartQty > 0 && <span className='text-green-400 ml-1'>(+{cartQty})</span>}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              {/* Non Indexed */}
+              <div className='flex-1 flex flex-col min-w-0 border-r border-slate-700 pr-1'>
+                <h3 className='border-b'>Non-Indexed ({nonIndexedPaints.length})</h3>
+                <div className='flex-1 overflow-y-auto flex flex-col gap-1 pr-1'>
+                  {nonIndexedPaints.map(paint => {
+                    const cartQty = shoppingCart[paint.code]?.qty || 0;
+                    return (
+                      <div
+                        key={paint.code}
+                        onClick={() => { setSelectedPaint(paint); setIsNewSelection(true); }}
+                        className='flex items-center justify-between text-sm p-2 cursor-pointer hover:bg-slate-800 rounded'
+                      >
+                        <div className='flex items-center gap-2 overflow-hidden'>
+                          <Circle size={16} fill={paint.hex} strokeWidth={1} />
+                          <span className='truncate'>{paint.code}</span>
+                        </div>
+                        <span className='font-bold'>
+                          {inventory[paint.code]?.qty || 0}
+                          {cartQty > 0 && <span className='text-green-400 ml-1'>(+{cartQty})</span>}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              {/*Shopping Cart*/}
+              <div className='flex-1 flex flex-col min-w-0 border-slate-700 pr-1'>
+                <h3 className='border-b'>Shopping cart</h3>
+                <div className='flex-1 overflow-y-auto flex flex-col gap-1 pr-1'>
+                  {allPaints.filter(p => shoppingCart[p.code]).map(paint => (
+                    <div
+                      key={paint.code}
+                      onClick={() => { setSelectedPaint(paint); setIsNewSelection(true); }}
+                      className='flex items-center justify-between text-sm p-2 cursor-pointer hover:bg-slate-800 rounded'
+                    >
+                      <div className='flex items-center gap-2 overflow-hidden'>
+                        <Circle size={16} fill={paint.hex} strokeWidth={1} />
+                        <span className='truncate'>{paint.code}</span>
+                      </div>
+                      <span className='font-bold'>{shoppingCart[paint.code]?.qty}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+            {/*Export buttons*/}
+            <div className='p-2 justify-center border-t flex flex-row gap-2'>
+              <button
+                onClick={() => handleExport('inventory')}
+                className='bg-blue-700 text-xs p-2 py-2 rounded hover:bg-blue-600 font-bold'>
+                EXPORT INVENTORY
+              </button>
+              <button
+                onClick={() => handleExport('non-indexed')}
+                className='bg-blue-700 text-xs p-2 py-2 rounded hover:bg-blue-600 font-bold'>
+                EXPORT NON INDEXED
+              </button>
+              <button
+                onClick={() => handleExport('cart')}
+                className='bg-blue-700 text-xs p-2 py-2 rounded hover:bg-blue-600 font-bold'>
+                EXPORT SHOPPING CART
+              </button>
+            </div>
           </div>
 
           <div className='flex-1 flex flex-col h-full overflow-hidden'>
@@ -250,18 +444,39 @@ function App() {
                     <div className='flex flex-col gap-2'>
                       <p className='truncate text-sm font-bold'>{selectedPaint.code}</p>
                       <p className='truncate text-xs text-slate-400'>{selectedPaint.name}</p>
-                      <div className='flex flex-row items-center gap-2 mt-2'>
-                        <p className='text-sm'>Qty: {inventory[selectedPaint.code]?.qty || 0}</p>
-                        <div className='flex gap-1'>
+
+                      {/* Inventory Controls */}
+                      <div className='flex flex-col gap-1 mt-2'>
+                        <p className='text-xs uppercase font-bold text-slate-500'>Inventory: {inventory[selectedPaint.code]?.qty || 0}</p>
+                        <div className='flex gap-2'>
                           <button
                             onClick={() => updateInventory(selectedPaint.code, 1)}
-                            className='bg-green-700 px-3 py-1 rounded hover:bg-green-600 text-sm'
+                            className='flex-1 bg-green-700 py-1 rounded hover:bg-green-600 text-sm font-bold'
                           >
                             +
                           </button>
                           <button
                             onClick={() => updateInventory(selectedPaint.code, -1)}
-                            className='bg-red-700 px-3 py-1 rounded hover:bg-red-600 text-sm'
+                            className='flex-1 bg-red-700 py-1 rounded hover:bg-red-600 text-sm font-bold'
+                          >
+                            -
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Shopping Cart Controls */}
+                      <div className='flex flex-col gap-1 mt-2 pt-2 border-t border-slate-700'>
+                        <p className='text-xs uppercase font-bold text-slate-500'>Shopping List: {shoppingCart[selectedPaint.code]?.qty || 0}</p>
+                        <div className='flex gap-2'>
+                          <button
+                            onClick={() => updateShoppingCart(selectedPaint.code, 1)}
+                            className='flex-1 bg-green-700 py-1 rounded hover:bg-green-600 text-sm font-bold'
+                          >
+                            +
+                          </button>
+                          <button
+                            onClick={() => updateShoppingCart(selectedPaint.code, -1)}
+                            className='flex-1 bg-red-700 py-1 rounded hover:bg-red-600 text-sm font-bold'
                           >
                             -
                           </button>
