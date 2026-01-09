@@ -272,7 +272,7 @@ function App() {
             <div className='flex-1 flex flex-row gap-2 p-2 overflow-y-auto min-h-0'>
               {/*Full Inventory */}
               <div className='flex-1 flex flex-col min-w-0 border-r border-slate-700 pr-1'>
-                <h3 className='border-b'>Inventory ({inventoryPaints.length})</h3>
+                <h3 className='border-b text-center'>Inventory ({inventoryPaints.length})</h3>
                 <div className='flex-1 overflow-y-auto flex flex-col gap-1 pr-1'>
                   {inventoryPaints.map(paint => {
                     const cartQty = shoppingCart[paint.code]?.qty || 0;
@@ -297,7 +297,7 @@ function App() {
               </div>
               {/* Non Indexed */}
               <div className='flex-1 flex flex-col min-w-0 border-r border-slate-700 pr-1'>
-                <h3 className='border-b'>Non-Indexed ({nonIndexedPaints.length})</h3>
+                <h3 className='border-b text-center'>Non-Indexed ({nonIndexedPaints.length})</h3>
                 <div className='flex-1 overflow-y-auto flex flex-col gap-1 pr-1'>
                   {nonIndexedPaints.map(paint => {
                     const cartQty = shoppingCart[paint.code]?.qty || 0;
@@ -322,7 +322,7 @@ function App() {
               </div>
               {/*Shopping Cart*/}
               <div className='flex-1 flex flex-col min-w-0 border-slate-700 pr-1'>
-                <h3 className='border-b'>Shopping cart</h3>
+                <h3 className='border-b text-center'>Shopping cart</h3>
                 <div className='flex-1 overflow-y-auto flex flex-col gap-1 pr-1'>
                   {allPaints.filter(p => shoppingCart[p.code]).map(paint => (
                     <div
